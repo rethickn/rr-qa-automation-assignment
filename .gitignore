@@ -1,0 +1,25 @@
+# Local secrets (never commit)
+.env
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Pytest
+.pytest_cache/
+
+# Playwright reports
+reports/
+screenshots/
+logs/
+allure-results/
+
+# Allure generated report
+allure-report/
+
+# Virtual environment
+.venv/
+venv/
+
+# macOS
+.DS_Store

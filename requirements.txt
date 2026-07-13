@@ -1,0 +1,15 @@
+# Test automation stack for the TMDB Discover demo
+# (https://tmdb-discover.surge.sh/)
+
+# Browser driver + sync API used to drive the UI and to make
+# in-process HTTP API calls (APIRequestContext).
+playwright>=1.47.0
+
+# Test runner
+pytest>=8.3.0
+
+# HTML report (self-contained, no extra tooling required)
+pytest-html>=4.1.0
+
+# Rich HTML/console reporting with steps, attachments and history
+allure-pytest>=2.13.0
