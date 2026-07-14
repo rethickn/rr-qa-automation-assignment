@@ -1,6 +1,6 @@
-# TMDB Discover — Functional Test Automation
+# TMDB Discover — Test Automation
 
-Automated functional test suite for the demo listing platform
+Automated test suite for the demo listing platform
 **https://tmdb-discover.surge.sh/** (a movie/TV discovery SPA backed by the
 public TMDB API).
 
@@ -9,8 +9,6 @@ public TMDB API).
 A robust End-to-End Test Automation Framework developed using **Playwright**, **Pytest**, and the **Page Object Model (POM)** to automate and validate the TMDB Discover web application.
 
 This framework validates UI functionality, backend API responses, pagination, category navigation, search, filters, logging, reporting, and screenshot capture while following industry-standard automation practices.
-
----
 
 # 🚀 Tech Stack
 
