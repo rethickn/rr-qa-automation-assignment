@@ -1,54 +1,93 @@
 # TMDB Discover — Test Automation: Answers & Documentation
 
-**TMDB Discover** end‑to‑end test automation framework. It covers strategy, the cases that were generated and why, the framework/libraries, how to run everything, the design techniques and coding patterns used, and the defects that were found.
+This document answers the assignment questions for the **TMDB Discover** end‑to‑end
+test automation framework. It covers strategy, the cases that were generated and
+why, the framework/libraries, how to run everything, the design techniques and
+coding patterns used, and the defects that were found.
 
 ---
 
 ## 1. Testing Strategy
 
-**Testing Strategy**
+The suite is built around a **black‑box end‑to‑end (E2E) strategy** with a thin
+layer of **API‑level contract testing** to cross‑check the UI. The application
+under test (SUT) is a React SPA (`https://tmdb-discover.surge.sh/`) backed by the
+public TMDB REST API.
 
-Built a black-box E2E test suite (Playwright + Chromium) for a React SPA backed by the TMDB API, combining three layers:
+The strategy has three pillars:
 
-- **UI E2E testing** – simulates real user flows (navigation, search, filters, pagination) and validates rendered results.
-- **API contract testing** – validates the underlying TMDB API responses independently, ensuring data correctness beyond the UI.
-- **Network monitoring** – verifies actual HTTP traffic to confirm UI–backend integration.
+1. **UI / functional E2E** — drive the real browser (Playwright + Chromium) the
+   way a user would: open the app, click category tabs, type in search, apply
+   filters, and paginate. Assertions are made against the rendered DOM.
+2. **Backend API contract testing** — call the *same* TMDB endpoints the UI calls
+   (via Playwright's `APIRequestContext`) and assert the JSON response shape,
+   required fields, and filtering behaviour. This makes the UI tests resilient to
+   cosmetic changes and lets us verify *data correctness* independently of the
+   SPA's rendering.
+3. **Live network monitoring** — attach a response listener to the live page and
+   assert the *actual* HTTP traffic the SUT emits (status codes, query params,
+   catalogue payloads). This proves the UI ↔ server integration end to end.
 
-Testing effort was prioritized around the core user journeys (category navigation, search, filters, pagination), with one known defect explicitly documented via an expected-failure test rather than hidden.
+**Risk‑based prioritisation.** Because the assignment scope is intentionally
+small, effort was focused on the highest‑value user journeys: category
+navigation, search, the four discover filters, and pagination. These are the core
+flows a real user exercises first. API validation and network monitoring are
+treated as supporting layers that harden those flows.
 
-Every run generates HTML, JUnit, and Allure reports with automatic failure screenshots — making results CI-ready and easy to review.
+**Defect documentation via `xfail`.** One known SPA defect (deep‑link slug
+navigation) is encoded explicitly as a *strict* expected failure so it is visible
+in reports rather than silently ignored or dressed up as a pass.
+
+**Reporting & observability.** Every run emits structured logs, an HTML report,
+a JUnit XML (CI‑friendly) and Allure results. Screenshots are captured
+automatically on failure/expected‑failure for fast triage.
 
 ---
 
 ## 2. Test Cases Generated (and why)
 
-**Test Coverage Summary**
+23 tests were generated across 6 modules (18 pass, 4 strict `xfail`, and the
+D‑03 case is an additional `xfail` that surfaces as XFAIL when the SUT's year
+filter misbehaves and XPASS — still green — when the in‑app refetch happens to
+succeed).
 
-23 automated tests across 6 modules — 18 passing, 5 flagged as expected failures (`xfail`) to document known SUT defects rather than hide them.
+| Module | Case | Why it exists |
+|---|---|---|
+| `test_api.py` | `test_api_discover_popular_is_well_formed` | Contract test: Popular catalogue returns `page=1`, `total_results>0`, results present, and required fields (`id`, `title`, `poster_path`, `vote_average`) exist. Guards backend regressions. |
+| `test_api.py` | `test_api_genre_filter_is_applied` | Verifies the Action genre filter is honoured server‑side (`genre_ids` contains 28). Validates filtering logic independent of UI. |
+| `test_api.py` | `test_network_monitor_captures_app_traffic` | Proves the SUT actually calls TMDB, returns 2xx, and the captured catalogue payload has results. End‑to‑end proof of the UI→network path. |
+| `test_categories.py` | `test_category_navigation[popular\|trending\|newest\|top_rated]` | Parametrised. Each category tab must route to the correct slug and render a result grid. Covers the primary navigation journeys. |
+| `test_discover.py` | `test_search_movie` | Smoke test. Searches "Toy Story", asserts the UI shows a match **and** the API returns matches (UI↔API cross‑check). |
+| `test_discover.py` | `test_filter_type` | Selects "TV Show" and asserts the control reflects it (react‑select single value). |
+| `test_discover.py` | `test_filter_genre` | Selects "Action" and asserts the genre chip is shown (multi‑select). |
+| `test_discover.py` | `test_filter_year` | Sets from/to years (2000–2020) and asserts both reflected values. |
+| `test_discover.py` | `test_filter_rating` | Selects a 4‑star rating and asserts the 4th star is highlighted. |
+| `test_discover.py` | `test_filter_year_backend_honors_range` | Cross‑checks that applying a year range (2010–2015) narrows results at the API level (`filtered < unfiltered`, `filtered > 0`). Decouples the data assertion from the SUT's occasionally‑flaky in‑app refetch. |
+| `test_pagination.py` | `test_user_can_navigate_to_next_page` | Click next → page 2. Core pagination behaviour. |
+| `test_pagination.py` | `test_user_can_navigate_to_previous_page` | Go to page 2 then back to page 1. |
+| `test_pagination.py` | `test_user_can_navigate_multiple_pages` | Jump directly to page 3. |
+| `test_pagination.py` | `test_previous_button_disabled_on_first_page` | Boundary check: previous disabled on page 1. |
+| `test_slugs.py` | `test_slug_direct_access_renders_results[/popular\|/trend\|/new\|/top]` | Parametrised **negative / known‑defect** tests (strict `xfail`). Direct deep‑link/refresh to a category slug renders an *empty* page — documents defect **D‑01**. |
+| `test_e2e_flow.py` | `test_user_filters_by_year_and_selects_second_movie` | **Full E2E user journey (happy path)**: open discover → apply year filter 2001–2025 → verify the control reflects the range → cross‑check the range at the API layer (`total_results > 0`) → read the 2nd movie's title/genre‑year → click/select it → assert the chosen card persists. Covers the intended end‑to‑end flow (UI + backend). Made refetch‑race‑safe by settling the grid before reading the 2nd card. |
+| `test_e2e_flow.py` | `test_year_filter_excludes_out_of_range_movies` | **Defect D‑03 (expected failure / `xfail`)**: same filter flow, then asserts *every* visible movie falls within 2001–2025. Fails when the SUT leaks out‑of‑range titles (e.g. 2026, and often 1978/1979) into the grid — a website bug. Reported as XFAIL when the bug manifests, XPASS (green) when the SUT's refetch happens to succeed (the SUT behaviour is intermittent). |
 
-**Highlights:**
-- **API contract tests** – validate TMDB backend responses (catalogue structure, genre filtering, live network traffic) independent of the UI.
-- **Category navigation** – parametrized tests across Popular, Trending, Newest, Top Rated.
-- **Search & filters** – search, type/genre/year/rating filters, with API cross-checks for backend accuracy.
-- **Pagination** – next/previous/multi-page navigation and boundary checks (e.g., previous disabled on page 1).
-- **Full E2E user journey** – filter → verify → select → confirm persistence, validated at both UI and API level.
-- **Known defects documented, not hidden:**
-  - Direct deep-link navigation to category slugs renders empty pages (4 `xfail` cases).
-  - Year filter occasionally leaks out-of-range movies into results (1 `xfail`, intermittent).
+ |
 
-**Testing techniques used:** positive/happy-path testing, boundary value analysis, and negative testing via expected-failure (`xfail`) cases — ensuring known bugs remain visible in reports instead of being silently skipped.
+**Distribution of techniques:**
+- Happy‑path functional flows (categories, search, filters, pagination) → positive assertions.
+- Boundary / edge values (previous disabled on first page, year range) → boundary value analysis.
+- Known defect → negative test encoded as strict `xfail` so the report still surfaces it.
 
 ---
 
 ## 3. Test Automation Framework (libraries & structure)
 
 **Tech stack**
-
-- **Python 3.14** — core language
-- **Playwright (≥1.47)** — browser automation (sync API) + `APIRequestContext` for HTTP calls, using the same engine for both UI and API checks for consistency
-- **pytest (≥8.3)** — test runner, fixtures, markers, hooks
-- **pytest-html (≥4.1)** — self-contained HTML reports
-- **allure-pytest (≥2.13)** — rich, step-based reporting with attachments
+- **Python 3.14** — language.
+- **Playwright (≥1.47)** — browser automation (sync API) + `APIRequestContext` for in‑process HTTP calls. The *same* engine the browser uses, so UI and API checks are consistent.
+- **pytest (≥8.3)** — test runner, fixtures, markers, hooks.
+- **pytest‑html (≥4.1)** — self‑contained HTML report.
+- **allure‑pytest (≥2.13)** — rich step‑based reporting with attachments.
 
 **Project structure (Page Object Model)**
 ```
@@ -75,38 +114,51 @@ TMDB-Automation/
 └── README.md
 ```
 
-**Dependency & Environment Management**
+**Dependency management.** All runtime deps are pinned in `requirements.txt`
+(`pip install -r requirements.txt`), and Playwright browsers are installed once
+with `playwright install`. The config file `pytest.ini` centralises markers and
+reporting so the environment is reproducible.
 
-All runtime dependencies are pinned in `requirements.txt` (`pip install -r requirements.txt`), with Playwright browsers installed once via `playwright install`. A central `pytest.ini` config manages markers and reporting, ensuring a reproducible environment.
-
-**Reporting & Execution**
-
-`pytest.ini` wires up HTML, Allure, JUnit, and console/file logging in one place — a single `pytest` run produces all artefacts. Screenshots, reports, and logs are saved into dedicated, git-ignored folders (`screenshots/`, `reports/`, `allure-results/`, `logs/`).
+**Reporting & execution management.** `pytest.ini` wires up HTML + Allure +
+JUnit + live console logging + file logging in one place, so a single
+`pytest` invocation produces every artefact. Screenshots and reports land in
+dedicated, git‑ignored folders (`screenshots/`, `reports/`, `allure-results/`,
+`logs/`).
 
 ---
 
 ## 4. How to Run the Tests
+
+```bash
 # 1. Create/activate a virtual environment (recommended)
 python3 -m venv .venv && source .venv/bin/activate
+
 # 2. Install dependencies
 pip install -r requirements.txt
+
 # 3. Install the browser engine (one-time)
 playwright install
+
 # 4. Run the full suite (headless, Chromium)
 pytest -v
+
 # 4b. Run headed (visible browser)
 pytest -v --headed
+
 # Run a single module / feature
 pytest tests/test_discover.py -v
 pytest tests/test_api.py -v
 pytest tests/test_pagination.py -v
+
 # Run by marker (e.g. only smoke / api / categories)
 pytest -m smoke -v
 pytest -m api -v
+
 # Generate reports
-pytest --html=reports/report.html --self-contained-html    # HTML
+pytest --html=reports/report.html --self-contained-html   # HTML
 pytest --alluredir=allure-results                          # Allure raw
 allure serve allure-results                                # Serve Allure
+```
 
 **Prerequisites:** internet access (the SUT and TMDB API are public endpoints).
 
@@ -114,16 +166,25 @@ allure serve allure-results                                # Serve Allure
 
 ## 5. Test Design Techniques Used
 
-**Testing Techniques Applied**
+- **Equivalence Partitioning / Boundary Value Analysis** — year range
+  (2000–2020), first‑page boundary for the disabled "previous" button, and
+  direct page jump (page 3).
+- **State Transition** — pagination (next → prev → jump) and category routing
+  (home → tab → slug).
+- **Positive vs Negative testing** — happy‑path flows assert success; the slug
+  tests assert a known defect and are marked `xfail`.
+- **Cross‑checking / Triangulation** — `test_search_movie` and
+  `test_filter_year_backend_honors_range` compare what the UI shows against what
+  the backend returns, catching mismatches the DOM alone would hide.
+- **Data‑driven testing** — `pytest.mark.parametrize` for categories (4 tabs)
+  and slugs (4 routes), avoiding copy‑paste and improving coverage per line of
+  code.
+- **Contract testing** — API payload schema/field validation independent of UI.
+- **Observational/integration testing** — live network monitoring asserts real
+  SUT traffic.
+- **Smoke tagging** — the critical happy‑path (`test_search_movie`) is tagged
+  `smoke` so it can be run in isolation for fast feedback.
 
-- **Equivalence Partitioning / Boundary Value Analysis** — year range (2000–2020), first-page boundary for the disabled "previous" button, direct page jump (page 3).
-- **State Transition Testing** — pagination (next → prev → jump) and category routing (home → tab → slug).
-- **Positive vs Negative Testing** — happy-path flows assert success; slug tests assert a known defect and are marked `xfail`.
-- **Cross-checking / Triangulation** — `test_search_movie` and `test_filter_year_backend_honors_range` compare UI output against backend data, catching mismatches the DOM alone would miss.
-- **Data-driven Testing** — `pytest.mark.parametrize` used for categories (4 tabs) and slugs (4 routes), reducing duplication and improving coverage per line of code.
-- **Contract Testing** — validates API payload schema/fields independent of the UI.
-- **Observational/Integration Testing** — live network monitoring confirms real SUT traffic.
-- **Smoke Tagging** — the critical happy-path (`test_search_movie`) is tagged `smoke` for fast, isolated feedback.
 ---
 
 ## 6. Coding Patterns Used
@@ -155,45 +216,89 @@ allure serve allure-results                                # Serve Allure
 
 ## 7. Defects Found
 
-**Known Defects**
+### D‑01 — Deep‑link / slug navigation renders an empty page *(reproduced, documented)*
+- **Symptom:** Directly navigating to (or refreshing) a category slug such as
+  `/popular`, `/trend`, `/new`, `/top` loads a blank page — no genre list and no
+  results grid.
+- **Root cause (diagnosed):** The SPA's initial data‑load effect does not run on
+  a hard navigation/deep link; only client‑side tab clicks trigger it. The
+  catch‑all route mounts the component but never fetches data.
+- **Evidence:** `test_slug_direct_access_renders_results[...]` (4 parametrised
+  cases) assert `result_count() > 0` and render **0 cards**, so they fail as
+  *strict* `xfail`. A screenshot is captured per slug under `screenshots/`.
+- **Severity:** Medium‑High — breaks refresh, bookmarks, and shared links.
+- **Recommended fix:** Trigger the initial data fetch in a `useEffect` keyed on
+  the route param (or use the slug as the data‑load signal) so deep links and
+  refreshes hydrate correctly.
 
-**D-01 — Deep-link/slug navigation renders an empty page** *(reproduced, documented)*
-- **Symptom:** Directly navigating to or refreshing a category slug (`/popular`, `/trend`, `/new`, `/top`) loads a blank page — no genre list, no results.
-- **Root cause:** The SPA's data-load effect only triggers on client-side tab clicks, not on hard navigation/deep links — the route mounts but never fetches data.
-- **Evidence:** 4 parametrised `test_slug_direct_access_renders_results` cases assert results exist but find 0 cards — reported as strict `xfail`, with a screenshot per slug.
-- **Severity:** Medium-High — breaks refresh, bookmarks, and shared links.
-- **Recommended fix:** Trigger the initial fetch in a `useEffect` keyed on the route param so deep links/refreshes hydrate correctly.
+### D‑02 — Year filter UI refetch can be flaky *(mitigated in tests)*
+- **Symptom:** Applying a year range in the UI occasionally doesn't narrow the
+  visible results immediately.
+- **Handling:** `test_filter_year_backend_honors_range` asserts the narrowing at
+  the **API** layer (which is reliable) rather than against the SUT's in‑app
+  refetch, so the test documents intent without being flaky. The UI value
+  reflection is still asserted separately in `test_filter_year`.
+- **Recommended fix:** Ensure the in‑app discover refetch is awaited/retried when
+  filter params change, and that it reuses the same query params the API client
+  builds.
 
-**D-02 — Year filter UI refetch can be flaky** *(mitigated in tests)*
-- **Symptom:** Applying a year range occasionally doesn't narrow visible results immediately.
-- **Handling:** `test_filter_year_backend_honors_range` validates narrowing at the reliable API layer instead of the flaky UI refetch; UI reflection is checked separately in `test_filter_year`.
-- **Recommended fix:** Ensure the in-app refetch is awaited/retried on filter change, using the same query params as the API client.
+### D‑03 — Year filter leaks out‑of‑range movies into the grid *(reproduced, documented)*
+- **Symptom:** After applying the year filter **2001–2025**, the grid still shows
+  titles released **outside** that range — notably **2026** movies, and often
+  **1978/1979** movies as well. The filter control reflects `2001`/`2025`
+  correctly, but the rendered results are not actually bounded by the range.
+- **Root cause (diagnosed):** The SUT's in‑app discover refetch does not reliably
+  honour the year bounds (a more severe form of D‑02). When the refetch is slow
+  or skipped, the grid keeps the previously‑loaded (unfiltered) results, which
+  include out‑of‑range years. The behaviour is **intermittent**: a manual probe
+  reproduced leaked years (2026, 1978, 1979) on 3/3 runs, while the full
+  `home.open()` + filter flow occasionally lets the refetch succeed and the grid
+  becomes correct.
+- **Evidence:** `test_year_filter_excludes_out_of_range_movies` applies the
+  2001–2025 filter, then asserts no visible card has a year `< 2001` or `> 2025`
+  (via `DiscoverPage.out_of_range_years`). It is marked `xfail(strict=False,
+  known_issue)` so it is reported as **XFAIL** (failed case) when the bug
+  manifests and **XPASS** (still green) when the SUT's refetch happens to
+  succeed. A screenshot is captured on the XFAIL via the failure hook.
+- **Severity:** High — users filtering by year still see irrelevant movies,
+  defeating the core purpose of the filter. Directly reproduces the behaviour
+  you reported (2026 titles shown under a 2001–2025 filter).
+- **Recommended fix:** Make the discover query derive `release_date.gte/lte`
+  strictly from the active year-filter state on every refetch, and gate rendering
+  on the *filtered* response (discard stale results). Add a client-side safety
+  check that drops any result whose `release_date` falls outside the selected
+  range.
 
-**D-03 — Year filter leaks out-of-range movies into the grid** *(reproduced, documented)*
-- **Symptom:** With a 2001–2025 filter applied, the grid still shows titles outside that range (notably 2026, and often 1978/1979), even though the filter control itself displays correctly.
-- **Root cause:** The in-app refetch doesn't reliably honour year bounds (a more severe form of D-02) — when slow/skipped, stale unfiltered results remain. Behaviour is intermittent: a manual probe reproduced the leak 3/3 times, while the full UI flow occasionally lets the refetch succeed.
-- **Evidence:** `test_year_filter_excludes_out_of_range_movies` asserts no visible card falls outside 2001–2025. Marked `xfail(strict=False)` — reports **XFAIL** when the bug appears, **XPASS** (still green) when the refetch succeeds. Screenshot captured on XFAIL.
-- **Severity:** High — defeats the core purpose of the year filter; directly matches the reported issue (2026 titles under a 2001–2025 filter).
-- **Recommended fix:** Derive `release_date.gte/lte` strictly from active filter state on every refetch, discard stale results, and add a client-side safety check to drop out-of-range results.
-
-> **Current run status:** `18 passed, 4 xfailed, 1 xpassed` (23 tests). The `xpassed` is D-03 on a run where the refetch succeeded; on runs where out-of-range years leak through, it reports XFAIL instead. The 4 strict `xfail` cases are D-01. The suite is green either way.
+> **Current run status:** `18 passed, 4 xfailed, 1 xpassed` (23 tests). The
+> `xpassed` is D‑03's `xfail` on a run where the SUT's refetch succeeded; on runs
+> where the SUT leaks out‑of‑range years (as you observed) it reports **XFAIL** —
+> i.e. the failed case is surfaced. The 4 strict `xfail` are D‑01 (slug
+> navigation). The suite is green either way.
 
 ---
 
 ## 8. Quality, Maintainability & Understandability Notes
 
 **Strengths**
-
-- Clean POM separation → tests read like specifications; centralised locators/constants minimise blast radius when the SUT changes.
-- Multiple, complementary reporting formats (HTML, Allure, JUnit, logs) — consumable by both humans and CI.
-- Automatic screenshots + structured logging enable fast failure triage.
-- Strict `xfail` keeps known defects visible instead of hiding them.
+- Clean POM separation → tests read like specifications; locator/constant
+  centralisation minimises blast radius when the SUT changes.
+- Multiple, complementary reporting formats (HTML, Allure, JUnit, logs) make
+  results consumable by humans and CI alike.
+- Automatic screenshots + structured logging give fast failure triage.
+- `xfail` (strict) keeps the known defect visible instead of hiding it.
 - Safe Allure fallback keeps the suite runnable in minimal environments.
 
-**Suggestions for Further Hardening**
-
-- **Cross-browser:** Currently Chromium-only (via `pytest-playwright`). Need to add Firefox/WebKit via the `browser` fixture for broader coverage.
-- **Secret hygiene:** `TMDB_API_KEY` is hardcoded in `utils/constants.py`. It's a read-only demo key, but for production-grade code, move it to an env var/secrets manager and confirm it's not a leaked key.
-- **Locators:** Some selectors rely on volatile `css-2b097c-container` / positional `nth=` indices (react-select generated classes). These may break on UI library upgrades — prefer stable `data-testid` attributes where possible.
-- **CI integration:** Wire `reports/junit.xml` into a CI pipeline and run the `smoke` marker on every push for fast feedback.
-- **Parallelism:** For a larger suite, consider `pytest-xdist` (note: shared `reports/` paths would need per-worker isolation).
+**Suggestions for further hardening**
+- **Cross‑browser:** currently Chromium‑only (via `pytest-playwright`). Add
+  `firefox`/`webkit` via the `browser` fixture for a broader matrix.
+- **Secret hygiene:** `TMDB_API_KEY` is hardcoded in `utils/constants.py`. It is
+  a read‑only demo key, but for production‑grade code move it to an env var /
+  secrets manager and confirm `constants.py` is not the source of a leaked key.
+- **Locators:** several selectors rely on volatile `css-2b097c-container` /
+  `nth=` positional indices (react‑select generated classes). If the SUT upgrades
+  its UI library these may break — prefer stable `data-testid` attributes where
+  possible.
+- **CI integration:** wire `reports/junit.xml` into a CI pipeline and run the
+  `smoke` marker on every push for fast feedback.
+- **Parallelism:** for a larger suite, consider `pytest-xdist` (note the shared
+  `reports/` paths would need per‑worker isolation).
